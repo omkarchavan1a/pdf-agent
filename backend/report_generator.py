@@ -96,10 +96,12 @@ def generate_pdf_report(
     filename: str,
     annotations: List[Dict],
     chat_history: List[Dict],
-    original_pdf_bytes: Optional[bytes] = None
+    original_pdf_bytes: Optional[bytes] = None,
+    pdf_edits: Optional[List[Dict]] = None
 ) -> bytes:
     """
     Build a PDF summary and optionally merge it with the original PDF.
+    Now also applies direct edits (Text Annotations) to the original pages.
     """
     # 1. Generate the Summary (Appendix) pages
     pdf = ReportPDF()
@@ -112,6 +114,7 @@ def generate_pdf_report(
     pdf.data_row("Process Date", datetime.utcnow().strftime("%B %d, %Y"))
     pdf.data_row("Note count", str(len(annotations)))
     pdf.data_row("Query count", str(len(chat_history)))
+    pdf.data_row("Direct Edits", str(len(pdf_edits) if pdf_edits else 0))
     pdf.ln(4)
 
     if annotations:
@@ -142,12 +145,24 @@ def generate_pdf_report(
 
     summary_bytes = pdf.output()
 
-    # 2. Merge with Original PDF if available
+    # 2. Process Original PDF (Apply Edits & Merge Appendix)
     if original_pdf_bytes:
         try:
             doc_orig = fitz.open(stream=original_pdf_bytes, filetype="pdf")
-            doc_summary = fitz.open(stream=summary_bytes, filetype="pdf")
             
+            # Apply Direct Edits (Sticky Notes)
+            if pdf_edits:
+                for edit in pdf_edits:
+                    page_idx = int(edit.get("page", 1)) - 1
+                    if 0 <= page_idx < len(doc_orig):
+                        page = doc_orig[page_idx]
+                        # Place in top-left margin (safe zone)
+                        point = fitz.Point(30, 30) 
+                        annot = page.add_text_annot(point, clean_unicode(edit["text"]), icon="Note")
+                        annot.set_info(title="AI Agent", content=clean_unicode(edit["text"]))
+                        annot.update()
+            
+            doc_summary = fitz.open(stream=summary_bytes, filetype="pdf")
             doc_orig.insert_pdf(doc_summary)
             merged_bytes = doc_orig.tobytes()
             
@@ -155,8 +170,7 @@ def generate_pdf_report(
             doc_summary.close()
             return merged_bytes
         except Exception as e:
-            # Fallback to just returning original or summary if merge fails (though it shouldn't)
-            print(f"Merge error: {e}")
+            print(f"PDF Processing/Merge error: {e}")
             return summary_bytes
     
     return summary_bytes

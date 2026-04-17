@@ -7,9 +7,17 @@ class AgentState(TypedDict):
     context: str
     result: str
 
+EDIT_INSTRUCTION = """
+If the user asks to 'add a note', 'edit', 'comment', or 'mark' the document:
+1. Provide a helpful textual confirmation in your response.
+2. Add a special tag at the very end: [[EDIT: Page X | Character-limited summary of the edit]]
+   - X is the page number (default to 1).
+   - The content should be the text of the sticky note to be placed on the PDF.
+"""
+
 def summarize_node(state: AgentState) -> Dict[str, Any]:
     llm = get_gemma_llm()
-    prompt = f"Summarize the following document excerpts for an executive overview:\n\n{state['context']}"
+    prompt = f"Summarize the following document excerpts for an executive overview:\n\n{state['context']}\n\n{EDIT_INSTRUCTION}"
     try:
         res = llm.invoke(prompt)
     except Exception as e:
@@ -18,7 +26,7 @@ def summarize_node(state: AgentState) -> Dict[str, Any]:
 
 def search_node(state: AgentState) -> Dict[str, Any]:
     llm = get_gemma_llm()
-    prompt = f"Answer the user query based on the provided document excerpts.\nQuery: {state['input_query']}\nContext:\n{state['context']}\nAnswer:"
+    prompt = f"Answer the user query based on the provided document excerpts.\nQuery: {state['input_query']}\nContext:\n{state['context']}\n\n{EDIT_INSTRUCTION}\nAnswer:"
     try:
         res = llm.invoke(prompt)
     except Exception as e:

@@ -37,6 +37,8 @@ if "graph" not in st.session_state:
     st.session_state.graph = build_agent_graph()
 if "original_pdf_bytes" not in st.session_state:
     st.session_state.original_pdf_bytes = None
+if "pdf_edits" not in st.session_state:
+    st.session_state.pdf_edits = []
 
 # ── Sidebar: Document Management ────────────────────────────────────────────
 with st.sidebar:
@@ -75,6 +77,7 @@ with st.sidebar:
                     st.session_state.doc_filename = uploaded_file.name
                     st.session_state.chat_history = []
                     st.session_state.annotations = []
+                    st.session_state.pdf_edits = []
                     st.success(f"Successfully indexed {len(chunks)} chunks!")
             finally:
                 if temp_path.exists():
@@ -109,7 +112,8 @@ with col2:
             filename=st.session_state.doc_filename,
             annotations=st.session_state.annotations,
             chat_history=st.session_state.chat_history,
-            original_pdf_bytes=st.session_state.original_pdf_bytes
+            original_pdf_bytes=st.session_state.original_pdf_bytes,
+            pdf_edits=st.session_state.pdf_edits
         )
         st.download_button(
             label="📥 Download Updated PDF",
@@ -159,7 +163,17 @@ else:
                     
                     st.write(answer)
                     
-                    # 4. Save to History
+                    # 4. Parse for PDF Edits
+                    import re
+                    edit_pattern = r"\[\[EDIT:\s*Page\s*(\d+)\s*\|\s*(.*?)\]\]"
+                    edits_found = re.findall(edit_pattern, answer)
+                    for page_num, content in edits_found:
+                        st.session_state.pdf_edits.append({
+                            "page": page_num,
+                            "text": content.strip()
+                        })
+                    
+                    # 5. Save to History
                     st.session_state.chat_history.append({
                         "query": prompt,
                         "response": answer,
