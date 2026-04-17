@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IDP Agent | Intelligent Document Processing</title>
+    <meta name="description" content="AI-powered document intelligence with semantic search, annotations, and downloadable reports.">
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <!-- GSAP -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="particles-container"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="logo">
+                <span class="icon">🧠</span>
+                <span class="text">IDP Intelligence</span>
+            </div>
+            <div class="header-right">
+                <div class="status">
+                    <span id="backend-status" class="online-dot offline"></span>
+                    <span id="status-label">Connecting...</span>
+                </div>
+                <!-- Download Report Button -->
+                <button class="download-btn hidden" id="download-btn" onclick="downloadReport()" title="Download PDF Report">
+                    <span>⬇</span> Download Report
+                </button>
+            </div>
+        </header>
+
+        <main class="hero-section">
+            <h1 class="hero-title">Unlock Document Intelligence</h1>
+            <p class="hero-subtitle">Semantic search · Annotations · Downloadable reports</p>
+        </main>
+
+        <div class="app-grid">
+            <!-- Left Panel: Upload + Annotations -->
+            <section class="panel glass doc-portal">
+                <div class="panel-header">
+                    <h2>Document Portal</h2>
+                    <span class="badge">PDF ONLY</span>
+                </div>
+
+                <div class="upload-zone" id="upload-zone">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">
+                        <strong>Click or Drag & Drop</strong>
+                        <span>PDF files only</span>
+                    </div>
+                    <input type="file" id="file-input" hidden accept=".pdf">
+                </div>
+
+                <div id="document-info" class="document-info hidden">
+                    <div class="doc-card">
+                        <div class="doc-icon">📑</div>
+                        <div class="doc-meta">
+                            <strong id="doc-name">document.pdf</strong>
+                            <span id="doc-size">0 MB</span>
+                        </div>
+                        <button class="reset-btn" id="reset-btn" title="Upload new document">✕</button>
+                    </div>
+                </div>
+
+                <div class="upload-progress hidden" id="upload-progress">
+                    <div class="progress-bar"><div class="progress-fill"></div></div>
+                    <span id="progress-label">Processing document...</span>
+                </div>
+
+                <!-- ── Annotations Panel ───────────────────────────── -->
+                <div id="annotations-panel" class="annotations-panel hidden">
+                    <div class="annotations-header">
+                        <span>📝 My Annotations</span>
+                        <span class="badge" id="ann-count">0</span>
+                    </div>
+
+                    <div class="annotation-input-wrap">
+                        <textarea
+                            id="annotation-input"
+                            placeholder="Add a note about this document (e.g. 'Key risk on page 3')..."
+                            rows="3"
+                        ></textarea>
+                        <button id="add-annotation-btn" class="add-ann-btn" onclick="addAnnotation()">
+                            + Add Note
+                        </button>
+                    </div>
+
+                    <div id="annotations-list" class="annotations-list">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel: Chat Interface -->
+            <section class="panel glass chat-interface">
+                <div class="panel-header">
+                    <h2>Intelligence Chat</h2>
+                    <div class="agent-status">
+                        <span class="agent-idle" id="agent-indicator"></span>
+                        <span id="agent-label">Agent Idle</span>
+                    </div>
+                </div>
+
+                <div class="chat-messages" id="chat-messages">
+                    <div class="message system">
+                        <div class="avatar">🤖</div>
+                        <div class="text">Welcome! Upload a PDF to begin analysis. You can also add personal annotations that I'll reference when answering questions.</div>
+                    </div>
+                </div>
+
+                <div class="chat-input-area">
+                    <textarea id="chat-input" placeholder="Ask about the document..." disabled></textarea>
+                    <button class="send-btn" id="send-btn" disabled>→</button>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+langchain
+langchain-community
+langchain-core
+langchain-huggingface
+langgraph
+PyMuPDF
+tensorflow
+sentence-transformers
+faiss-cpu
+fastapi
+uvicorn
+huggingface_hub
+python-dotenv
+openai
+fpdf2
+python-multipart
