@@ -6,8 +6,8 @@ import io
 from datetime import datetime
 from pathlib import Path
 
-# Add backend to path for imports
-sys.path.append(str(Path(__file__).parent / "backend"))
+# Add project root to path for package imports
+sys.path.append(str(Path(__file__).parent))
 
 from backend.parser import extract_text_from_pdf, chunk_text
 from backend.agent_graph import build_agent_graph
@@ -33,6 +33,8 @@ if "doc_filename" not in st.session_state:
     st.session_state.doc_filename = ""
 if "graph" not in st.session_state:
     st.session_state.graph = build_agent_graph()
+if "original_pdf_bytes" not in st.session_state:
+    st.session_state.original_pdf_bytes = None
 
 # ── Sidebar: Document Management ────────────────────────────────────────────
 with st.sidebar:
@@ -43,10 +45,13 @@ with st.sidebar:
     
     if uploaded_file and uploaded_file.name != st.session_state.doc_filename:
         with st.spinner(f"Indexing {uploaded_file.name}..."):
-            # Save temp file
+            # Store original bytes for later merging
+            st.session_state.original_pdf_bytes = uploaded_file.getvalue()
+            
+            # Save temp file for indexing
             temp_path = Path("backend") / f"temp_{uploaded_file.name}"
             with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getvalue())
+                f.write(st.session_state.original_pdf_bytes)
             
             try:
                 # Extract and Chunk
@@ -91,33 +96,38 @@ with st.sidebar:
                     st.session_state.annotations.pop(i)
                     st.rerun()
 
-    st.markdown("---")
-    if st.session_state.doc_filename and st.button("📥 Download Analysis Report"):
-        pdf_bytes = generate_pdf_report(
+# ── Main UI: Chat Interface ─────────────────────────────────────────────────
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.header("🔍 Document Chat")
+with col2:
+    if st.session_state.doc_filename and st.session_state.original_pdf_bytes:
+        # Generate the consolidated PDF (Original + Appendix)
+        updated_pdf_data = generate_pdf_report(
             filename=st.session_state.doc_filename,
             annotations=st.session_state.annotations,
-            chat_history=st.session_state.chat_history
+            chat_history=st.session_state.chat_history,
+            original_pdf_bytes=st.session_state.original_pdf_bytes
         )
-        report_name = f"Report_{st.session_state.doc_filename.replace('.pdf', '')}.pdf"
         st.download_button(
-            label="Click to Save PDF",
-            data=pdf_bytes,
-            file_name=report_name,
-            mime="application/pdf"
+            label="📥 Download Updated PDF",
+            data=updated_pdf_data,
+            file_name=f"{st.session_state.doc_filename.replace('.pdf', '')}_Updated.pdf",
+            mime="application/pdf",
+            use_container_width=True
         )
-
-# ── Main UI: Chat Interface ─────────────────────────────────────────────────
-st.header("🔍 Document Chat")
 
 if not st.session_state.doc_filename:
     st.info("Please upload a PDF document in the sidebar to start chatting.")
 else:
-    # Display Chat History
-    for chat in st.session_state.chat_history:
-        with st.chat_message("user"):
-            st.write(chat["query"])
-        with st.chat_message("assistant"):
-            st.write(chat["response"])
+    # Display Chat History In a Container
+    chat_container = st.container()
+    with chat_container:
+        for chat in st.session_state.chat_history:
+            with st.chat_message("user"):
+                st.write(chat["query"])
+            with st.chat_message("assistant"):
+                st.write(chat["response"])
 
     # Chat Input
     if prompt := st.chat_input("Ask something about the document..."):
@@ -153,6 +163,7 @@ else:
                         "response": answer,
                         "timestamp": datetime.utcnow().strftime("%H:%M")
                     })
+                    st.rerun() # Ensure download button updates with new history
                 except Exception as e:
                     st.error(f"Error invoking agent: {e}")
 
@@ -160,12 +171,17 @@ else:
 st.markdown("""
 <style>
     .stChatMessage {
-        border-radius: 10px;
-        margin-bottom: 10px;
+        border-radius: 12px;
+        margin-bottom: 12px;
+        border: 1px solid #1E293B;
     }
     .stButton>button {
-        width: 100%;
-        border-radius: 5px;
+        border-radius: 8px;
+        transition: all 0.2s ease;
+    }
+    .stButton>button:hover {
+        border-color: #00D1FF;
+        box-shadow: 0 0 10px rgba(0, 209, 255, 0.2);
     }
 </style>
 """, unsafe_allow_html=True)
