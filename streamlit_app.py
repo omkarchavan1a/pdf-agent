@@ -6,8 +6,10 @@ import io
 from datetime import datetime
 from pathlib import Path
 
-# Add project root to path for package imports
-sys.path.append(str(Path(__file__).parent))
+# Add project root and backend to path for package imports
+root_path = Path(__file__).parent
+sys.path.append(str(root_path))
+sys.path.append(str(root_path / "backend"))
 
 from backend.parser import extract_text_from_pdf, chunk_text
 from backend.agent_graph import build_agent_graph
