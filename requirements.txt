@@ -12,3 +12,6 @@ openai
 fpdf2
 streamlit
 torch
+fastapi
+uvicorn
+python-multipart

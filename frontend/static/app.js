@@ -108,7 +108,7 @@ async function processFile(file) {
             resetUpload();
         }
     } catch {
-        addMessage('system', '❌ Could not reach the backend. Make sure the server is running on port 8001.');
+        addMessage('system', '❌ Could not reach the backend. Make sure the server is healthy.');
         resetUpload();
     } finally {
         setTimeout(() => {
