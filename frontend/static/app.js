@@ -1,6 +1,7 @@
 // IDP Agent — Frontend Logic v4 (Annotations + Download Report)
 
 document.addEventListener('DOMContentLoaded', () => {
+    ensureSessionId();
     initAnimations();
     initUpload();
     initChat();
@@ -101,6 +102,7 @@ async function processFile(file) {
             enableChat();
             showAnnotationsPanel();
             document.getElementById('download-btn').classList.remove('hidden');
+            document.getElementById('end-chat-btn').classList.remove('hidden');
             addMessage('system', `✅ **${file.name}** ready!\n\n📊 *${data.chunks_indexed} knowledge chunks indexed.* You can now:\n- 💬 Ask questions about the document\n- 📝 Add personal annotations (left panel)\n- ⬇️ Download a PDF report anytime`);
             checkBackend();
         } else {
@@ -125,11 +127,13 @@ function showDocumentInfo() {
 }
 
 function resetUpload() {
+    endConversation(false);
     document.getElementById('file-input').value   = '';
     document.getElementById('document-info').classList.add('hidden');
     document.getElementById('upload-zone').classList.remove('hidden');
     document.getElementById('annotations-panel').classList.add('hidden');
     document.getElementById('download-btn').classList.add('hidden');
+    document.getElementById('end-chat-btn').classList.add('hidden');
     document.getElementById('annotations-list').innerHTML = '';
     document.getElementById('ann-count').innerText = '0';
     disableChat();
@@ -261,6 +265,7 @@ function initChat() {
 async function sendMessage() {
     const input = document.getElementById('chat-input');
     const query = input.value.trim();
+    const sessionId = ensureSessionId();
     if (!query || input.disabled) return;
 
     addMessage('user', query);
@@ -271,7 +276,7 @@ async function sendMessage() {
         const res  = await fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query })
+            body: JSON.stringify({ query, session_id: sessionId })
         });
         const data = await res.json();
 
@@ -303,7 +308,12 @@ function addMessage(type, text) {
     const chat = document.getElementById('chat-messages');
     const msg  = document.createElement('div');
     msg.className = `message ${type}`;
-    msg.innerHTML = `<div class="avatar">${type === 'user' ? '👤' : '🤖'}</div><div class="text"></div>`;
+    msg.innerHTML = `
+        <div class="avatar">${type === 'user' ? '👤' : '🤖'}</div>
+        <div class="message-content">
+            <div class="text"></div>
+        </div>
+    `;
     const target = msg.querySelector('.text');
     chat.appendChild(msg);
 
@@ -314,6 +324,18 @@ function addMessage(type, text) {
         else target.style.opacity = '1';
     } else {
         target.innerText = text;
+        const content = msg.querySelector('.message-content');
+        const actions = document.createElement('div');
+        actions.className = 'message-actions';
+        actions.innerHTML = `<button class="message-action-btn" type="button" title="Edit this message">Edit</button>`;
+        actions.querySelector('button').addEventListener('click', () => {
+            const input = document.getElementById('chat-input');
+            if (input.disabled) return;
+            input.value = text;
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+        });
+        content.appendChild(actions);
     }
 
     if (typeof gsap !== 'undefined') gsap.from(msg, { opacity: 0, x: type === 'user' ? 20 : -20, duration: 0.4, ease: 'power2.out' });
@@ -345,4 +367,36 @@ function setAgentBusy(busy) {
 
 function escapeHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function ensureSessionId() {
+    let sessionId = localStorage.getItem('idp_session_id');
+    if (!sessionId) {
+        sessionId = (window.crypto && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        localStorage.setItem('idp_session_id', sessionId);
+    }
+    return sessionId;
+}
+
+async function endConversation(showMessage = true) {
+    const sessionId = localStorage.getItem('idp_session_id');
+    if (!sessionId) return;
+    try {
+        await fetch('/chat/end', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId })
+        });
+        localStorage.removeItem('idp_session_id');
+        ensureSessionId();
+        if (showMessage) {
+            addMessage('system', '🧹 Temporary memory cleared for this conversation.');
+        }
+    } catch {
+        if (showMessage) {
+            addMessage('system', '⚠️ Could not clear temporary memory.');
+        }
+    }
 }

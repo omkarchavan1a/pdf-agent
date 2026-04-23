@@ -10,9 +10,7 @@ load_dotenv()
 class NvidiaLLM(LLM):
     """
     LangChain-compatible wrapper around the NVIDIA NIM OpenAI-compatible API.
-    Uses meta/llama-3.3-70b-instruct — proven stable and supports text-generation.
-    This replaces HuggingFaceEndpoint which requires 'Inference Providers' permission
-    that the current HF token does not have.
+    Uses meta/llama-3.3-70b-instruct.
     """
     model: str = "meta/llama-3.3-70b-instruct"
     max_tokens: int = 1024
@@ -57,7 +55,7 @@ def get_gemma_llm() -> NvidiaLLM:
     """
     Returns the LLM instance (singleton to avoid repeated init overhead).
     Name kept as get_gemma_llm() for backward-compatibility with agent_graph.py.
-    Now powered by NVIDIA NIM (Llama-3.3-70B) instead of HuggingFace Gemma.
+    Now powered by NVIDIA NIM (Llama-3.3-70B).
     """
     global _llm_instance
     if _llm_instance is None:

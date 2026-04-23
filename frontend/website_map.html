@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website Map | IDP Intelligence</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .map-page {
+            min-height: 100vh;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .map-card {
+            width: 100%;
+            max-width: 900px;
+        }
+        .map-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .map-item {
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.03);
+        }
+        .map-item h3 {
+            font-size: 1rem;
+            margin-bottom: 0.4rem;
+        }
+        .map-item p {
+            color: var(--text-dim);
+            font-size: 0.88rem;
+            line-height: 1.4;
+        }
+        .map-actions {
+            margin-top: 1.5rem;
+            display: flex;
+            justify-content: flex-end;
+        }
+        .map-btn {
+            border: 1px solid var(--primary);
+            background: rgba(34, 211, 238, 0.15);
+            color: var(--primary);
+            border-radius: 10px;
+            padding: 0.7rem 1rem;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="map-page">
+        <section class="glass map-card">
+            <div class="panel-header">
+                <h2>Website Map & How It Works</h2>
+                <span class="badge">Step 2</span>
+            </div>
+            <p style="color:var(--text-dim);">
+                The website flow is organized into the following pages and actions:
+            </p>
+            <div class="map-grid">
+                <article class="map-item">
+                    <h3>1) User Details</h3>
+                    <p>Collect Gmail and phone number and create a unique session ID for temporary conversation tracking.</p>
+                </article>
+                <article class="map-item">
+                    <h3>2) Website Map</h3>
+                    <p>Explains the full page flow and core functionality before entering the chat workspace.</p>
+                </article>
+                <article class="map-item">
+                    <h3>3) Chat Workspace</h3>
+                    <p>Upload PDF, ask real-time questions, add annotations, edit sent messages, and download reports.</p>
+                </article>
+                <article class="map-item">
+                    <h3>4) Temporary Memory</h3>
+                    <p>Conversation data is stored in MongoDB while chat is active and deleted when the chat session ends.</p>
+                </article>
+            </div>
+            <div class="map-actions">
+                <a class="map-btn" href="/app">Open Chat Workspace</a>
+            </div>
+        </section>
+    </div>
+</body>
+</html>
