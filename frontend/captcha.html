@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Details | IDP Intelligence</title>
+    <title>CAPTCHA Verification | IDP Intelligence</title>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
     <link rel="stylesheet" href="/static/style.css">
     <style>
         .simple-page {
@@ -26,20 +27,6 @@
             font-size: 0.9rem;
             color: var(--text-dim);
         }
-        .simple-form input {
-            width: 100%;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 0.8rem;
-            color: var(--text-main);
-            font-family: inherit;
-            font-size: 0.95rem;
-        }
-        .simple-form input:focus {
-            outline: none;
-            border-color: var(--primary);
-        }
         .simple-submit {
             border: 1px solid var(--primary);
             background: rgba(34, 211, 238, 0.15);
@@ -61,26 +48,22 @@
     <div class="simple-page">
         <section class="glass simple-card">
             <div class="panel-header">
-                <h2>User Access Details</h2>
-                <span class="badge">Step 2</span>
+                <h2>Human Verification</h2>
+                <span class="badge">Step 1</span>
             </div>
             <p style="margin-bottom:1rem;color:var(--text-dim);">
-                Enter your Gmail and phone number to continue to the main app.
+                Complete CAPTCHA verification to continue.
             </p>
-            <form id="details-form" class="simple-form">
+            <form id="captcha-form" class="simple-form">
                 <div>
-                    <label for="email">Gmail address</label>
-                    <input id="email" type="email" placeholder="you@gmail.com" required>
-                </div>
-                <div>
-                    <label for="phone">Phone number</label>
-                    <input id="phone" type="tel" placeholder="+91 9876543210" required>
+                    <label>Verify you are a real user</label>
+                    <div class="cf-turnstile" data-sitekey="__TURNSTILE_SITE_KEY__"></div>
                 </div>
                 <div id="error" class="simple-error"></div>
                 <button class="simple-submit" type="submit">Continue</button>
             </form>
         </section>
     </div>
-    <script src="/static/user_details.js"></script>
+    <script src="/static/captcha.js"></script>
 </body>
 </html>

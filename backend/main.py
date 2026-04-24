@@ -39,6 +39,7 @@ RATE_LIMITS = {
     "/chat": (20, 60),
     "/upload": (8, 60),
     "/annotations": (30, 60),
+    "/captcha/verify": (10, 60),
     "/user-details": (10, 60),
     "/chat/end": (20, 60),
 }
@@ -100,6 +101,7 @@ app.state.doc_filename = ""
 app.state.mongo_client = None
 app.state.mongo_memory = None
 app.state.rate_buckets = defaultdict(deque)
+app.state.human_verified_sessions = set()
 
 # ── Static Frontend ────────────────────────────────────────────────────────
 BASE_DIR = pathlib.Path(__file__).parent.parent
@@ -207,8 +209,12 @@ def verify_turnstile_token(token: str, remote_ip: str) -> bool:
 
 
 def session_is_human_verified(session_id: str) -> bool:
-    if not app.state.mongo_memory:
+    if not session_id:
+        return False
+    if session_id in app.state.human_verified_sessions:
         return True
+    if not app.state.mongo_memory:
+        return not is_captcha_enabled()
     try:
         record = app.state.mongo_memory.find_one({"session_id": session_id}, {"human_verified": 1})
         return bool(record and record.get("human_verified"))
@@ -217,9 +223,27 @@ def session_is_human_verified(session_id: str) -> bool:
         return False
 
 
+def mark_session_human_verified(session_id: str):
+    app.state.human_verified_sessions.add(session_id)
+    upsert_session_memory(session_id, {
+        "human_verified": True,
+    })
+
+
 @app.get("/")
 async def serve_root():
-    return RedirectResponse(url="/user-details", status_code=302)
+    return RedirectResponse(url="/captcha", status_code=302)
+
+
+@app.get("/captcha")
+async def serve_captcha():
+    captcha_path = frontend_dir / "captcha.html"
+    if captcha_path.exists():
+        html = captcha_path.read_text(encoding="utf-8")
+        site_key = os.getenv("TURNSTILE_SITE_KEY", "").strip()
+        html = html.replace("__TURNSTILE_SITE_KEY__", site_key)
+        return HTMLResponse(content=html)
+    return {"message": "Captcha page not found"}
 
 
 @app.get("/app")
@@ -234,10 +258,7 @@ async def serve_frontend():
 async def serve_user_details():
     details_path = frontend_dir / "user_details.html"
     if details_path.exists():
-        html = details_path.read_text(encoding="utf-8")
-        site_key = os.getenv("TURNSTILE_SITE_KEY", "").strip()
-        html = html.replace("__TURNSTILE_SITE_KEY__", site_key)
-        return HTMLResponse(content=html)
+        return FileResponse(str(details_path))
     return {"message": "User details page not found"}
 
 
@@ -275,7 +296,11 @@ class AnnotationRequest(BaseModel):
 class UserDetailsRequest(BaseModel):
     email: str
     phone: str
-    captcha_token: str
+    session_id: Optional[str] = None
+
+
+class CaptchaVerifyRequest(BaseModel):
+    captcha_token: Optional[str] = ""
     session_id: Optional[str] = None
 
 
@@ -287,8 +312,18 @@ class EndChatRequest(BaseModel):
 graph = build_agent_graph()
 
 
+@app.post("/captcha/verify")
+async def verify_captcha(request: CaptchaVerifyRequest, raw_request: Request):
+    session_id = request.session_id.strip() if request.session_id else str(uuid4())
+    client_ip = get_client_ip(raw_request)
+    if not verify_turnstile_token(request.captcha_token or "", client_ip):
+        raise HTTPException(status_code=400, detail="CAPTCHA verification failed.")
+    mark_session_human_verified(session_id)
+    return {"message": "CAPTCHA verified.", "session_id": session_id}
+
+
 @app.post("/user-details")
-async def save_user_details(request: UserDetailsRequest, raw_request: Request):
+async def save_user_details(request: UserDetailsRequest):
     email = request.email.strip().lower()
     phone = request.phone.strip()
     if not email or "@" not in email or not email.endswith("@gmail.com"):
@@ -296,11 +331,16 @@ async def save_user_details(request: UserDetailsRequest, raw_request: Request):
     if not phone:
         raise HTTPException(status_code=400, detail="Please enter your phone number.")
 
-    client_ip = get_client_ip(raw_request)
-    if not verify_turnstile_token(request.captcha_token, client_ip):
-        raise HTTPException(status_code=400, detail="CAPTCHA verification failed.")
+    session_id = request.session_id.strip() if request.session_id else ""
+    if is_captcha_enabled():
+        if not session_id:
+            raise HTTPException(status_code=400, detail="Session missing. Complete CAPTCHA first.")
+        if not session_is_human_verified(session_id):
+            raise HTTPException(status_code=400, detail="Session is not human-verified. Complete CAPTCHA first.")
+    elif not session_id:
+        session_id = str(uuid4())
+        mark_session_human_verified(session_id)
 
-    session_id = request.session_id.strip() if request.session_id else str(uuid4())
     upsert_session_memory(session_id, {
         "user_email": email,
         "user_phone": phone,
@@ -360,8 +400,11 @@ async def chat_with_pdf(request: QueryRequest):
         return {"error": "Query cannot be empty."}
     if len(request.query) > 4000:
         return {"error": "Query too long. Please keep it under 4000 characters."}
-    if is_captcha_enabled() and request.session_id and not session_is_human_verified(request.session_id):
-        return {"error": "Session is not human-verified. Complete CAPTCHA first."}
+    if is_captcha_enabled():
+        if not request.session_id:
+            return {"error": "Session ID missing. Complete CAPTCHA and user details first."}
+        if not session_is_human_verified(request.session_id):
+            return {"error": "Session is not human-verified. Complete CAPTCHA first."}
 
     retrieved_context = app.state.vector_store.search(request.query, top_k=5)
 
@@ -404,6 +447,7 @@ async def end_chat(request: EndChatRequest):
     session_id = request.session_id.strip()
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required.")
+    app.state.human_verified_sessions.discard(session_id)
     if app.state.mongo_memory:
         try:
             app.state.mongo_memory.delete_one({"session_id": session_id})

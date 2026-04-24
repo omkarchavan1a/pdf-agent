@@ -1,6 +1,12 @@
 document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('details-form');
     const errorEl = document.getElementById('error');
+    const sessionId = localStorage.getItem('idp_session_id');
+
+    if (!sessionId) {
+        window.location.href = '/captcha';
+        return;
+    }
 
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -8,8 +14,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const email = document.getElementById('email').value.trim().toLowerCase();
         const phone = document.getElementById('phone').value.trim();
-        const captchaTokenInput = document.querySelector('[name="cf-turnstile-response"]');
-        const captchaToken = captchaTokenInput ? captchaTokenInput.value : '';
 
         if (!email.endsWith('@gmail.com')) {
             errorEl.textContent = 'Please use a valid Gmail address.';
@@ -19,25 +23,12 @@ document.addEventListener('DOMContentLoaded', () => {
             errorEl.textContent = 'Phone number is required.';
             return;
         }
-        const captchaWidget = document.querySelector('.cf-turnstile');
-        const captchaConfigured = !!(captchaWidget && (captchaWidget.dataset.sitekey || '').trim());
-        if (captchaConfigured && !captchaToken) {
-            errorEl.textContent = 'Please complete CAPTCHA verification.';
-            return;
-        }
-
-        let sessionId = localStorage.getItem('idp_session_id');
-        if (!sessionId) {
-            sessionId = (window.crypto && crypto.randomUUID)
-                ? crypto.randomUUID()
-                : `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-        }
 
         try {
             const res = await fetch('/user-details', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, phone, captcha_token: captchaToken, session_id: sessionId }),
+                body: JSON.stringify({ email, phone, session_id: sessionId }),
             });
             const data = await res.json();
 
@@ -47,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             localStorage.setItem('idp_session_id', data.session_id || sessionId);
-            window.location.href = '/website-map';
+            window.location.href = '/app';
         } catch {
             errorEl.textContent = 'Could not reach backend. Please try again.';
         }
