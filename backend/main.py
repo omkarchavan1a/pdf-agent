@@ -18,10 +18,18 @@ from collections import defaultdict, deque
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from parser import extract_text_from_pdf, chunk_text
-from agent_graph import build_agent_graph
-from vector_store import VectorStore
-from report_generator import generate_pdf_report
+try:
+    # Package imports (works when loaded as `backend.main`).
+    from .parser import extract_text_from_pdf, chunk_text
+    from .agent_graph import build_agent_graph
+    from .vector_store import VectorStore
+    from .report_generator import generate_pdf_report
+except ImportError:
+    # Script-mode fallback (works when running `python backend/main.py`).
+    from parser import extract_text_from_pdf, chunk_text
+    from agent_graph import build_agent_graph
+    from vector_store import VectorStore
+    from report_generator import generate_pdf_report
 
 app = FastAPI(title="AI Document Intelligence API")
 

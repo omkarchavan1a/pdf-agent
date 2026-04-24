@@ -1,6 +1,11 @@
 from typing import Dict, Any, TypedDict
 from langgraph.graph import StateGraph, END
-from llm_setup import get_gemma_llm
+try:
+    # Package import path.
+    from .llm_setup import get_gemma_llm
+except ImportError:
+    # Script-mode fallback.
+    from llm_setup import get_gemma_llm
 
 class AgentState(TypedDict):
     input_query: str
