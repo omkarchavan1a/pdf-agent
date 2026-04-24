@@ -1,7 +1,7 @@
 import os
 import random
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,7 +15,6 @@ sys.path.append(str(ROOT_PATH / "backend"))
 from backend.agent_graph import build_agent_graph
 from backend.parser import chunk_text, extract_text_from_pdf
 from backend.report_generator import generate_pdf_report
-from backend.vector_store import VectorStore
 from streamlit_chat_utils import build_edited_filename, rebuild_pdf_edits_from_chat_history
 
 
@@ -61,6 +60,15 @@ def clear_edit_state() -> None:
     st.session_state.editing_query_text = ""
     st.session_state.is_editing_turn = False
     st.session_state.pending_edited_query = ""
+
+
+def get_or_create_vector_store():
+    if st.session_state.vector_store is None:
+        # Lazy import avoids loading heavy transformer modules before needed.
+        from backend.vector_store import VectorStore
+
+        st.session_state.vector_store = VectorStore()
+    return st.session_state.vector_store
 
 
 def reset_session_to_captcha() -> None:
@@ -111,7 +119,7 @@ def append_chat_turn(query: str, response: str) -> None:
         {
             "query": query,
             "response": response,
-            "timestamp": datetime.utcnow().strftime("%H:%M"),
+            "timestamp": datetime.now(UTC).strftime("%H:%M"),
         }
     )
     st.session_state.pdf_edits = rebuild_pdf_edits_from_chat_history(st.session_state.chat_history)
@@ -127,11 +135,9 @@ def regenerate_index_from_pdf_bytes(pdf_bytes: bytes) -> None:
         if not text.strip():
             raise ValueError("No text found in edited PDF.")
         chunks = chunk_text(text)
-        if st.session_state.vector_store is None:
-            st.session_state.vector_store = VectorStore()
-        else:
-            st.session_state.vector_store.clear()
-        st.session_state.vector_store.add_documents(chunks)
+        vector_store = get_or_create_vector_store()
+        vector_store.clear()
+        vector_store.add_documents(chunks)
     finally:
         if temp_path.exists():
             os.remove(temp_path)
@@ -247,7 +253,7 @@ def render_pdf_chat_app() -> None:
             st.session_state.annotations.append(
                 {
                     "text": new_note.strip(),
-                    "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+                    "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M"),
                 }
             )
             st.rerun()

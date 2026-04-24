@@ -9,3 +9,4 @@ font = "sans serif"
 port = 8501
 headless = true
 enableCORS = false
+fileWatcherType = "none"
