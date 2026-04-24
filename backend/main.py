@@ -72,6 +72,10 @@ def enforce_rate_limit(request: Request) -> Optional[JSONResponse]:
     return None
 
 
+def is_frame_embed_allowed() -> bool:
+    return os.getenv("ALLOW_FRAME_EMBED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
     blocked = enforce_rate_limit(request)
@@ -79,10 +83,12 @@ async def security_middleware(request: Request, call_next):
         return blocked
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    allow_embed = is_frame_embed_allowed()
+    if not allow_embed:
+        response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = (
+    csp = (
         "default-src 'self'; "
         "script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com; "
         "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; "
@@ -91,6 +97,9 @@ async def security_middleware(request: Request, call_next):
         "connect-src 'self'; "
         "frame-src https://challenges.cloudflare.com"
     )
+    if allow_embed:
+        csp += "; frame-ancestors 'self' http://localhost:8501 http://127.0.0.1:8501"
+    response.headers["Content-Security-Policy"] = csp
     return response
 
 # ── App State ──────────────────────────────────────────────────────────────
