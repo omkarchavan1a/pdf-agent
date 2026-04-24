@@ -343,10 +343,18 @@ async def verify_captcha(request: CaptchaVerifyRequest, raw_request: Request):
 async def save_user_details(request: UserDetailsRequest):
     email = request.email.strip().lower()
     phone = request.phone.strip()
-    if not email or "@" not in email or not email.endswith("@gmail.com"):
-        raise HTTPException(status_code=400, detail="Please enter a valid Gmail address.")
-    if not phone:
-        raise HTTPException(status_code=400, detail="Please enter your phone number.")
+    
+    # Email validation - must be valid Gmail format
+    import re
+    email_regex = re.compile(r'^[a-zA-Z0-9._%+-]+@gmail\.com$')
+    if not email or not email_regex.match(email):
+        raise HTTPException(status_code=400, detail="Please enter a valid Gmail address (e.g., username@gmail.com).")
+    
+    # Phone validation - must be valid international format
+    cleaned_phone = re.sub(r'[\s\-\(\)]', '', phone)
+    phone_regex = re.compile(r'^\+?[1-9]\d{1,14}$')
+    if not cleaned_phone or not phone_regex.match(cleaned_phone):
+        raise HTTPException(status_code=400, detail="Please enter a valid phone number with country code (e.g., +91 9876543210).")
 
     session_id = request.session_id.strip() if request.session_id else ""
     if is_captcha_enabled():
