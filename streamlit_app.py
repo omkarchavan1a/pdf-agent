@@ -60,6 +60,7 @@ def clear_edit_state() -> None:
     st.session_state.editing_turn_index = None
     st.session_state.editing_query_text = ""
     st.session_state.is_editing_turn = False
+    st.session_state.pending_edited_query = ""
 
 
 def reset_session_to_captcha() -> None:
@@ -76,8 +77,6 @@ def reset_session_to_captcha() -> None:
         "graph",
         "original_pdf_bytes",
         "pdf_edits",
-        "captcha_input",
-        "note_input",
         "editing_turn_index",
         "editing_query_text",
         "is_editing_turn",
@@ -140,7 +139,7 @@ def regenerate_index_from_pdf_bytes(pdf_bytes: bytes) -> None:
 
 def handle_edit_save() -> None:
     edit_index = st.session_state.editing_turn_index
-    edited_query = st.session_state.editing_query_text.strip()
+    edited_query = st.session_state.get("pending_edited_query", "").strip()
     if edit_index is None:
         st.error("No message selected for editing.")
         return
@@ -174,7 +173,6 @@ def render_captcha_gate() -> None:
         with col1:
             if st.button("Refresh code", use_container_width=True):
                 st.session_state.captcha_code = generate_captcha_code()
-                st.session_state.captcha_input = ""
                 st.rerun()
         with col2:
             if st.button("Continue", type="primary", use_container_width=True):
@@ -320,10 +318,15 @@ def render_pdf_chat_app() -> None:
     if st.session_state.is_editing_turn:
         with st.container(border=True):
             st.subheader("Edit previous question")
-            st.text_area("Edited question", key="editing_query_text", height=100)
+            edited_value = st.text_area(
+                "Edited question",
+                value=st.session_state.editing_query_text,
+                height=100,
+            )
             save_col, cancel_col = st.columns(2)
             with save_col:
                 if st.button("Save edit", type="primary", use_container_width=True):
+                    st.session_state.pending_edited_query = edited_value
                     handle_edit_save()
             with cancel_col:
                 if st.button("Cancel edit", use_container_width=True):
