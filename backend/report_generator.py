@@ -1,9 +1,7 @@
 import fitz  # PyMuPDF
 from fpdf import FPDF
 from typing import List, Dict, Optional
-from datetime import datetime
-import io
-import re
+from datetime import UTC, datetime
 
 def clean_unicode(text: str) -> str:
     """
@@ -30,6 +28,66 @@ def clean_unicode(text: str) -> str:
         
     # Fallback: remove any other non-latin-1 characters
     return text.encode('latin-1', 'replace').decode('latin-1')
+
+
+def normalize_overlay_text(text: str, max_len: int = 300) -> str:
+    cleaned = "".join(ch for ch in str(text) if ch in ("\n", "\t") or ch >= " ")
+    cleaned = " ".join(cleaned.split())
+    if len(cleaned) > max_len:
+        cleaned = cleaned[:max_len].rstrip()
+    return cleaned
+
+
+def normalize_pdf_edits_for_render(pdf_edits: Optional[List[Dict]], page_count: int) -> List[Dict]:
+    if not pdf_edits:
+        return []
+
+    normalized: List[Dict] = []
+    seen = set()
+    for edit in pdf_edits:
+        try:
+            page = int(edit.get("page", 1))
+        except (TypeError, ValueError):
+            page = 1
+
+        if page_count > 0:
+            page = max(1, min(page, page_count))
+        else:
+            page = max(1, page)
+
+        text = normalize_overlay_text(edit.get("text", ""))
+        if not text:
+            continue
+
+        key = (page, text)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append({"page": page, "text": text})
+    return normalized
+
+
+def draw_visible_edit_overlay(page: fitz.Page, page_number: int, text: str, slot_index: int) -> None:
+    x0 = 36
+    y0 = 36 + (slot_index * 62)
+    box_width = min(290, max(180, page.rect.width - 72))
+    y1 = min(y0 + 56, page.rect.height - 36)
+    if y1 <= y0 + 12:
+        y0 = max(36, page.rect.height - 92)
+        y1 = page.rect.height - 36
+
+    rect = fitz.Rect(x0, y0, x0 + box_width, y1)
+    page.draw_rect(rect, color=(0.0, 0.45, 0.75), fill=(0.9, 0.97, 1.0), width=0.8)
+    text_rect = fitz.Rect(rect.x0 + 6, rect.y0 + 5, rect.x1 - 6, rect.y1 - 5)
+    overlay_text = f"AI EDIT (Page {page_number}): {normalize_overlay_text(text)}"
+    page.insert_textbox(
+        text_rect,
+        overlay_text,
+        fontsize=8.5,
+        fontname="helv",
+        color=(0.0, 0.22, 0.36),
+        align=fitz.TEXT_ALIGN_LEFT,
+    )
 
 
 
@@ -60,7 +118,7 @@ class ReportPDF(FPDF):
         self.set_text_color(*self.C_LIGHT)
         self.set_y(10)
         self.set_x(-75)
-        self.cell(63, 10, clean_unicode(datetime.utcnow().strftime("%Y-%m-%d  |  IDP-772")), align="R", border=0)
+        self.cell(63, 10, clean_unicode(datetime.now(UTC).strftime("%Y-%m-%d  |  IDP-772")), align="R", border=0)
         self.ln(22)
 
     def footer(self):
@@ -111,7 +169,7 @@ def generate_pdf_report(
     
     pdf.section_header("Analysis Metadata")
     pdf.data_row("Source File", filename)
-    pdf.data_row("Process Date", datetime.utcnow().strftime("%B %d, %Y"))
+    pdf.data_row("Process Date", datetime.now(UTC).strftime("%B %d, %Y"))
     pdf.data_row("Note count", str(len(annotations)))
     pdf.data_row("Query count", str(len(chat_history)))
     pdf.data_row("Direct Edits", str(len(pdf_edits) if pdf_edits else 0))
@@ -143,24 +201,44 @@ def generate_pdf_report(
             pdf.multi_cell(0, 6, clean_unicode(item["response"]))
             pdf.ln(4)
 
+    if pdf_edits:
+        pdf.add_page()
+        pdf.section_header("Applied Direct Edits")
+        for i, edit in enumerate(pdf_edits, 1):
+            page_number = edit.get("page", 1)
+            text = normalize_overlay_text(edit.get("text", ""))
+            if not text:
+                continue
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*pdf.C_MID)
+            pdf.cell(0, 7, clean_unicode(f"EDIT #{i} - Page {page_number}"), ln=True)
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(*pdf.C_TEXT)
+            pdf.multi_cell(0, 6, clean_unicode(text))
+            pdf.ln(2)
+
     summary_bytes = pdf.output()
 
     # 2. Process Original PDF (Apply Edits & Merge Appendix)
     if original_pdf_bytes:
         try:
             doc_orig = fitz.open(stream=original_pdf_bytes, filetype="pdf")
+            normalized_edits = normalize_pdf_edits_for_render(pdf_edits, len(doc_orig))
             
-            # Apply Direct Edits (Sticky Notes)
-            if pdf_edits:
-                for edit in pdf_edits:
+            # Apply visible direct edits on target pages.
+            if normalized_edits:
+                slot_counters: Dict[int, int] = {}
+                for edit in normalized_edits:
                     page_idx = int(edit.get("page", 1)) - 1
                     if 0 <= page_idx < len(doc_orig):
-                        page = doc_orig[page_idx]
-                        # Place in top-left margin (safe zone)
-                        point = fitz.Point(30, 30) 
-                        annot = page.add_text_annot(point, clean_unicode(edit["text"]), icon="Note")
-                        annot.set_info(title="AI Agent", content=clean_unicode(edit["text"]))
-                        annot.update()
+                        slot = slot_counters.get(page_idx, 0)
+                        draw_visible_edit_overlay(
+                            doc_orig[page_idx],
+                            page_idx + 1,
+                            str(edit["text"]),
+                            slot,
+                        )
+                        slot_counters[page_idx] = slot + 1
             
             doc_summary = fitz.open(stream=summary_bytes, filetype="pdf")
             doc_orig.insert_pdf(doc_summary)

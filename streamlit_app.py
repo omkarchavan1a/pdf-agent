@@ -1,3 +1,4 @@
+import logging
 import os
 import random
 import sys
@@ -5,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+import fitz
 import streamlit as st
 
 # Add project root and backend to path for package imports.
@@ -15,11 +17,50 @@ sys.path.append(str(ROOT_PATH / "backend"))
 from backend.agent_graph import build_agent_graph
 from backend.parser import chunk_text, extract_text_from_pdf
 from backend.report_generator import generate_pdf_report
-from streamlit_chat_utils import build_edited_filename, rebuild_pdf_edits_from_chat_history
+from streamlit_chat_utils import (
+    DEFAULT_MAX_EDIT_TEXT_LEN,
+    build_edited_filename,
+    extract_pdf_edits_from_response,
+    normalize_pdf_edits,
+    parse_direct_edit_command,
+    rebuild_pdf_edits_from_chat_history,
+    strip_control_chars,
+)
+
+
+LOGGER = logging.getLogger(__name__)
+MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024
+MAX_CHAT_INPUT_CHARS = 2000
 
 
 def generate_captcha_code() -> str:
     return f"{random.randint(10000, 99999)}"
+
+
+def now_timestamp(fmt: str) -> str:
+    return datetime.now(UTC).strftime(fmt)
+
+
+def sanitize_chat_input(text: str) -> str:
+    cleaned = strip_control_chars(text or "").strip()
+    return cleaned[:MAX_CHAT_INPUT_CHARS]
+
+
+def is_probably_pdf(data: bytes) -> bool:
+    if not data:
+        return False
+    probe = data[:1024].lstrip()
+    return probe.startswith(b"%PDF-")
+
+
+def validate_pdf_upload(filename: str, data: bytes) -> str | None:
+    if not (filename or "").lower().endswith(".pdf"):
+        return "Only PDF files are supported."
+    if len(data) > MAX_UPLOAD_SIZE_BYTES:
+        return "PDF is too large. Maximum allowed size is 25 MB."
+    if not is_probably_pdf(data):
+        return "Invalid PDF file signature."
+    return None
 
 
 def initialize_session_state() -> None:
@@ -31,7 +72,6 @@ def initialize_session_state() -> None:
         "user_profile": {"email": "", "phone": ""},
         "vector_store": None,
         "chat_history": [],
-        "annotations": [],
         "doc_filename": "",
         "graph": None,
         "original_pdf_bytes": None,
@@ -39,6 +79,8 @@ def initialize_session_state() -> None:
         "editing_turn_index": None,
         "editing_query_text": "",
         "is_editing_turn": False,
+        "pending_edited_query": "",
+        "flash_message": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -80,7 +122,6 @@ def reset_session_to_captcha() -> None:
         "user_profile",
         "vector_store",
         "chat_history",
-        "annotations",
         "doc_filename",
         "graph",
         "original_pdf_bytes",
@@ -88,6 +129,8 @@ def reset_session_to_captcha() -> None:
         "editing_turn_index",
         "editing_query_text",
         "is_editing_turn",
+        "pending_edited_query",
+        "flash_message",
     ]
     for key in keys_to_remove:
         if key in st.session_state:
@@ -95,11 +138,21 @@ def reset_session_to_captcha() -> None:
     initialize_session_state()
 
 
+def get_current_page_count() -> int:
+    pdf_bytes = st.session_state.original_pdf_bytes
+    if not pdf_bytes:
+        return 0
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        page_count = len(doc)
+        doc.close()
+        return page_count
+    except Exception:
+        return 0
+
+
 def build_query_context(query: str) -> str:
     context = st.session_state.vector_store.search(query, top_k=5)
-    if st.session_state.annotations:
-        notes = "\n".join(f"- {a['text']}" for a in st.session_state.annotations)
-        context += f"\n\n[User Annotations]\n{notes}"
     return context
 
 
@@ -114,15 +167,24 @@ def generate_answer_for_query(query: str) -> str:
     return answer
 
 
+def rebuild_effective_pdf_edits() -> None:
+    page_count = get_current_page_count()
+    st.session_state.pdf_edits = rebuild_pdf_edits_from_chat_history(
+        st.session_state.chat_history,
+        page_count=page_count,
+        max_text_len=DEFAULT_MAX_EDIT_TEXT_LEN,
+    )
+
+
 def append_chat_turn(query: str, response: str) -> None:
     st.session_state.chat_history.append(
         {
             "query": query,
             "response": response,
-            "timestamp": datetime.now(UTC).strftime("%H:%M"),
+            "timestamp": now_timestamp("%H:%M"),
         }
     )
-    st.session_state.pdf_edits = rebuild_pdf_edits_from_chat_history(st.session_state.chat_history)
+    rebuild_effective_pdf_edits()
 
 
 def regenerate_index_from_pdf_bytes(pdf_bytes: bytes) -> None:
@@ -143,9 +205,19 @@ def regenerate_index_from_pdf_bytes(pdf_bytes: bytes) -> None:
             os.remove(temp_path)
 
 
+def build_updated_pdf_bytes() -> bytes:
+    return generate_pdf_report(
+        filename=st.session_state.doc_filename,
+        annotations=[],
+        chat_history=st.session_state.chat_history,
+        original_pdf_bytes=st.session_state.original_pdf_bytes,
+        pdf_edits=st.session_state.pdf_edits,
+    )
+
+
 def handle_edit_save() -> None:
     edit_index = st.session_state.editing_turn_index
-    edited_query = st.session_state.get("pending_edited_query", "").strip()
+    edited_query = sanitize_chat_input(st.session_state.get("pending_edited_query", ""))
     if edit_index is None:
         st.error("No message selected for editing.")
         return
@@ -155,8 +227,9 @@ def handle_edit_save() -> None:
 
     try:
         regenerated_answer = generate_answer_for_query(edited_query)
-    except Exception as exc:
-        st.error(f"Error regenerating edited message: {exc}")
+    except Exception:
+        LOGGER.exception("Error regenerating edited message")
+        st.error("Could not regenerate edited response. Please try again.")
         return
 
     st.session_state.chat_history = st.session_state.chat_history[:edit_index]
@@ -218,6 +291,10 @@ def render_user_details_gate() -> None:
 
 
 def render_pdf_chat_app() -> None:
+    if st.session_state.flash_message:
+        st.success(st.session_state.flash_message)
+        st.session_state.flash_message = ""
+
     with st.sidebar:
         st.markdown(
             f"Logged in as `{st.session_state.user_profile.get('email', '')}`",
@@ -233,53 +310,43 @@ def render_pdf_chat_app() -> None:
 
         if uploaded_file and uploaded_file.name != st.session_state.doc_filename:
             with st.spinner(f"Indexing {uploaded_file.name}..."):
-                st.session_state.original_pdf_bytes = uploaded_file.getvalue()
+                uploaded_bytes = uploaded_file.getvalue()
+                validation_error = validate_pdf_upload(uploaded_file.name, uploaded_bytes)
+                if validation_error:
+                    st.error(validation_error)
+                else:
+                    st.session_state.original_pdf_bytes = uploaded_bytes
 
-                try:
-                    regenerate_index_from_pdf_bytes(st.session_state.original_pdf_bytes)
-                    st.session_state.doc_filename = uploaded_file.name
-                    st.session_state.chat_history = []
-                    st.session_state.annotations = []
-                    st.session_state.pdf_edits = []
-                    clear_edit_state()
-                    st.success("PDF indexed successfully.")
-                except Exception as exc:
-                    st.error(f"Failed to process uploaded PDF: {exc}")
-
-        st.markdown("---")
-        st.subheader("Annotations")
-        new_note = st.text_input("Add a private note/context", key="note_input")
-        if st.button("Add annotation") and new_note.strip():
-            st.session_state.annotations.append(
-                {
-                    "text": new_note.strip(),
-                    "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M"),
-                }
-            )
-            st.rerun()
-
-        if st.session_state.annotations:
-            for idx, note in enumerate(st.session_state.annotations):
-                with st.expander(f"Note {idx + 1} ({note['timestamp']})"):
-                    st.write(note["text"])
-                    if st.button("Delete", key=f"delete_note_{idx}"):
-                        st.session_state.annotations.pop(idx)
-                        st.rerun()
+                    try:
+                        regenerate_index_from_pdf_bytes(st.session_state.original_pdf_bytes)
+                        st.session_state.doc_filename = uploaded_file.name
+                        st.session_state.chat_history = []
+                        st.session_state.pdf_edits = []
+                        clear_edit_state()
+                        st.success("PDF indexed successfully.")
+                    except Exception:
+                        LOGGER.exception("Failed to process uploaded PDF")
+                        st.error("Failed to process PDF safely. Try another PDF file.")
 
     col1, col2 = st.columns([3, 2])
     with col1:
         st.header("PDF Chat Workspace")
 
     updated_pdf_data = None
+    has_visible_edits = bool(st.session_state.pdf_edits)
+    has_chat_history = bool(st.session_state.chat_history)
+    has_effective_updates = has_visible_edits or has_chat_history
+
     with col2:
         if st.session_state.doc_filename and st.session_state.original_pdf_bytes:
-            updated_pdf_data = generate_pdf_report(
-                filename=st.session_state.doc_filename,
-                annotations=st.session_state.annotations,
-                chat_history=st.session_state.chat_history,
-                original_pdf_bytes=st.session_state.original_pdf_bytes,
-                pdf_edits=st.session_state.pdf_edits,
-            )
+            if has_visible_edits:
+                st.info(f"Visible PDF edits captured: {len(st.session_state.pdf_edits)}")
+            elif has_chat_history:
+                st.info("Chat history will appear in the appendix section of downloaded PDF.")
+            else:
+                st.warning("No updates detected yet. Download will look close to original.")
+
+            updated_pdf_data = build_updated_pdf_bytes()
             action_download, action_apply = st.columns(2)
             with action_download:
                 st.download_button(
@@ -293,13 +360,13 @@ def render_pdf_chat_app() -> None:
                 if st.button("Apply edited PDF", use_container_width=True):
                     try:
                         regenerate_index_from_pdf_bytes(updated_pdf_data)
-                    except Exception as exc:
-                        st.error(f"Failed to apply edited PDF: {exc}")
+                    except Exception:
+                        LOGGER.exception("Failed to apply edited PDF")
+                        st.error("Failed to apply edited PDF. Please try again.")
                     else:
                         st.session_state.original_pdf_bytes = updated_pdf_data
                         st.session_state.doc_filename = build_edited_filename(st.session_state.doc_filename)
                         st.session_state.chat_history = []
-                        st.session_state.annotations = []
                         st.session_state.pdf_edits = []
                         clear_edit_state()
                         st.success("Edited PDF applied. Chat reset for a fresh conversation.")
@@ -344,18 +411,59 @@ def render_pdf_chat_app() -> None:
     if not prompt:
         return
 
+    sanitized_prompt = sanitize_chat_input(prompt)
+    if not sanitized_prompt:
+        st.error("Please enter a valid message.")
+        return
+
     with st.chat_message("user"):
-        st.write(prompt)
+        st.write(sanitized_prompt)
+
+    page_count = get_current_page_count()
+    direct_edit = parse_direct_edit_command(
+        sanitized_prompt,
+        max_text_len=DEFAULT_MAX_EDIT_TEXT_LEN,
+    )
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
-                answer = generate_answer_for_query(prompt)
+                if direct_edit:
+                    normalized_direct_edits = normalize_pdf_edits(
+                        [direct_edit],
+                        page_count=page_count,
+                        max_text_len=DEFAULT_MAX_EDIT_TEXT_LEN,
+                    )
+                    if not normalized_direct_edits:
+                        st.error("Could not parse edit command. Use: /edit page=<n> text=<note>")
+                        return
+                    edit = normalized_direct_edits[0]
+                    answer = (
+                        f"Confirmed: change captured for page {edit['page']}. "
+                        "It will appear in Download/Apply edited PDF.\n\n"
+                        f"[[EDIT: Page {edit['page']} | {edit['text']}]]"
+                    )
+                else:
+                    answer = generate_answer_for_query(sanitized_prompt)
                 st.write(answer)
-                append_chat_turn(prompt, answer)
+                append_chat_turn(sanitized_prompt, answer)
+
+                parsed_edits = normalize_pdf_edits(
+                    extract_pdf_edits_from_response(
+                        answer,
+                        max_text_len=DEFAULT_MAX_EDIT_TEXT_LEN,
+                    ),
+                    page_count=page_count,
+                    max_text_len=DEFAULT_MAX_EDIT_TEXT_LEN,
+                )
+                if parsed_edits:
+                    st.session_state.flash_message = (
+                        f"Confirmed: {len(parsed_edits)} change(s) captured in PDF update queue."
+                    )
                 st.rerun()
-            except Exception as exc:
-                st.error(f"Error invoking agent: {exc}")
+            except Exception:
+                LOGGER.exception("Error while processing chat message")
+                st.error("Could not process this request. Please try again.")
 
 
 st.set_page_config(
