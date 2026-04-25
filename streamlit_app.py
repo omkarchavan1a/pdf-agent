@@ -49,8 +49,8 @@ def sanitize_chat_input(text: str) -> str:
 def is_probably_pdf(data: bytes) -> bool:
     if not data:
         return False
-    probe = data[:1024].lstrip()
-    return probe.startswith(b"%PDF-")
+    probe = data[:1024]
+    return b"%PDF-" in probe
 
 
 def validate_pdf_upload(filename: str, data: bytes) -> str | None:

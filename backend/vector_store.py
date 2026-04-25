@@ -27,6 +27,7 @@ class VectorStore:
         if HAS_SENTENCE_TRANSFORMERS and SentenceTransformer is not None:
             try:
                 self.model = SentenceTransformer(model_name)  # type: ignore
+                self.dimension = self.model.get_sentence_embedding_dimension()
                 self.use_fallback = False
                 # Prefer FAISS if available for fast similarity search
                 if HAS_FAISS and faiss is not None:
@@ -78,7 +79,7 @@ class VectorStore:
         else:
             # Fallback path: lightweight embedding per chunk
             emb = self._simple_embedding(chunks)
-            self._fallback_embeddings.append(emb)
+            self._fallback_embeddings.extend(emb.tolist())
         print(f"[OK] Indexed {len(chunks)} document chunks.")
 
     def _cosine_similarity(self, a: np.ndarray, b: np.ndarray) -> float:
