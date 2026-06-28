@@ -7,18 +7,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-class NvidiaLLM(LLM):
+
+class SarvamLLM(LLM):
     """
-    LangChain-compatible wrapper around the NVIDIA NIM OpenAI-compatible API.
-    Uses meta/llama-3.3-70b-instruct.
+    LangChain-compatible wrapper around the Sarvam AI OpenAI-compatible API.
+    Uses sarvam-30b by default.
     """
-    model: str = "meta/llama-3.3-70b-instruct"
-    max_tokens: int = 1024
-    temperature: float = 0.7
+    model: str = os.getenv("SARVAM_MODEL", "sarvam-30b")
+    max_tokens: int = 4096
+    temperature: float = 0.0
 
     @property
     def _llm_type(self) -> str:
-        return "nvidia-nim"
+        return "sarvam-ai"
 
     def _call(
         self,
@@ -27,13 +28,14 @@ class NvidiaLLM(LLM):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> str:
-        api_key = os.getenv("NVIDIA_API_KEY")
+        api_key = os.getenv("SARVAM_API_KEY")
         if not api_key:
-            return "Error: NVIDIA_API_KEY not set in .env"
+            return "Error: SARVAM_API_KEY not set in .env"
 
         client = OpenAI(
-            base_url="https://integrate.api.nvidia.com/v1",
+            base_url="https://api.sarvam.ai/v1",
             api_key=api_key,
+            default_headers={"api-subscription-key": api_key}
         )
 
         try:
@@ -43,22 +45,31 @@ class NvidiaLLM(LLM):
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
             )
-            return response.choices[0].message.content.strip()
+            
+            content = response.choices[0].message.content
+            if not content:
+                content = getattr(response.choices[0].message, 'reasoning_content', None)
+                
+            if not content:
+                return "Error: Empty response received from Sarvam AI model"
+                
+            return content.strip()
         except Exception as e:
-            return f"NVIDIA NIM Error: {str(e)}"
+            return f"Sarvam AI Error: {str(e)}"
 
 
 # Singleton instance — avoids rebuilding on every call
 _llm_instance = None
 
-def get_gemma_llm() -> NvidiaLLM:
+def get_gemma_llm() -> SarvamLLM:
     """
     Returns the LLM instance (singleton to avoid repeated init overhead).
     Name kept as get_gemma_llm() for backward-compatibility with agent_graph.py.
-    Now powered by NVIDIA NIM (Llama-3.3-70B).
+    Now powered by Sarvam AI.
     """
     global _llm_instance
     if _llm_instance is None:
-        _llm_instance = NvidiaLLM()
-        print("[OK] NVIDIA NIM LLM initialized (meta/llama-3.3-70b-instruct)")
+        _llm_instance = SarvamLLM()
+        print(f"[OK] Sarvam AI LLM initialized ({_llm_instance.model})")
     return _llm_instance
+
